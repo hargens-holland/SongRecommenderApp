@@ -2,7 +2,8 @@ import sqlite3
 import pandas as pd
 
 # Connect to the database
-conn = sqlite3.connect("song_recommender.db")
+conn = sqlite3.connect("../song_recommender.db")
+# Add this debug code
 
 # Load songs and select useful features
 query = """
@@ -52,25 +53,75 @@ similarity_df = pd.DataFrame(similarity_matrix, index=df["title"], columns=df["t
 
 def recommend_songs(song_title, num_recommendations=5):
     """Finds similar songs based on features and displays both title & artist."""
-    if song_title not in similarity_df.index:
-        print("❌ Song not found in database!")
+
+    try:
+        # Parse input for title and artist
+        if " by " in song_input.lower():
+            title, artist = song_input.split(" by ", 1)
+            title = title.strip()
+            artist = artist.strip()
+
+            # Connect to database
+            conn = sqlite3.connect("../song_recommender.db")
+            cursor = conn.cursor()
+
+            # Search for exact match with both title and artist
+            cursor.execute("""
+                        SELECT title, artist 
+                        FROM songs 
+                        WHERE LOWER(title) = LOWER(?) 
+                        AND LOWER(artist) = LOWER(?)
+                    """, (title, artist))
+        else:
+            # If no artist specified, just search by title
+            title = song_input
+            conn = sqlite3.connect("../song_recommender.db")
+            cursor = conn.cursor()
+            cursor.execute("""
+                        SELECT title, artist 
+                        FROM songs 
+                        WHERE LOWER(title) = LOWER(?)
+                    """, (title,))
+        # Open connection
+        conn = sqlite3.connect("../song_recommender.db")
+        cursor = conn.cursor()
+
+        # Search for the exact song in the database
+        cursor.execute("SELECT title, artist FROM songs WHERE LOWER(title) = LOWER(?)", (song_title,))
+        song_rows = cursor.fetchall()  # Get all matches, not just one
+
+        if not song_rows:
+            print(f"❌ Song '{song_title}' not found in database!")
+            return []
+
+        # If multiple matches, let user specify which artist
+        if len(song_rows) > 1:
+            print("\nMultiple matches found:")
+            for i, (title, artist) in enumerate(song_rows):
+                print(f"{i + 1}. '{title}' by {artist}")
+            print("\nPlease specify which version by including the artist name")
+            return []
+
+        song_title, song_artist = song_rows[0]  # Take first match if only one
+        print(f"🎵 Searching for similar songs to '{song_title}' by {song_artist}...")
+
+        # Fetch song features from database
+        query = """
+            SELECT title, artist, bpm, energy, danceability, loudness, valence 
+            FROM songs 
+            WHERE bpm IS NOT NULL 
+        """
+        df = pd.read_sql_query(query, conn)
+
+        # Rest of your similarity calculation code...
+
+    except sqlite3.Error as e:
+        print(f"Database error: {e}")
         return []
-
-    # Get similarity scores for the song
-    similar_songs = similarity_df[song_title].sort_values(ascending=False)[1:num_recommendations + 1]
-
-    # Create a mapping of titles to artists
-    song_artist_map = df.set_index("title")["artist"].to_dict()
-
-    # Print results
-    print(f"🎵 Songs similar to '{song_title}' by {song_artist_map.get(song_title, 'Unknown Artist')}:")
-    for song, score in similar_songs.items():
-        artist = song_artist_map.get(song, "Unknown Artist")
-        print(f"{song} by {artist} (Similarity: {score:.2f})")
-
-    return [(song, song_artist_map.get(song, "Unknown Artist")) for song in similar_songs.index]
-
+    finally:
+        conn.close()  # Close connection in finally block
 
 # Example test
-song = input("What song would you like to look for recommendations for?")
-recommend_songs(song)
+print("✅ Checking available song titles in similarity_df...")
+print(similarity_df.index.tolist())
+recommend_songs("Breathe")
